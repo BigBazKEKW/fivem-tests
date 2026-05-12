@@ -2,7 +2,7 @@
 FiveM Lockpick Minigame Auto-Solver - DEBUG VERSION
 Shows a live window of what the script sees, with colored overlays.
 Press ESC to quit.
-Added: 5 seconds after an 'E' press, presses '1' (ą) once.
+Now presses '1' (key above Q) immediately after every 'E' press.
 """
 
 import sys
@@ -36,8 +36,7 @@ MIN_ORANGE_SPREAD = 10.0
 MAX_ORANGE_SPREAD = 180.0
 ANGLE_TOLERANCE   = 0.0
 ACTION_KEY        = "e"
-DELAY_AFTER_E     = 5.0          # seconds after last 'E' press
-FOLLOW_UP_KEY     = "1"          # key above Q (1 / ą)
+FOLLOW_UP_KEY     = "2"          # key above Q, physically VK_1 (ą on Lithuanian layout)
 
 pydirectinput.PAUSE    = 0
 pydirectinput.FAILSAFE = False
@@ -81,10 +80,6 @@ def main():
     cy = MONITOR["height"] / 2.0
     last_press_time = 0.0
 
-    # ---- New: delayed follow-up press ----
-    last_e_time = 0.0          # timestamp of last 'E' press
-    one_triggered = False      # prevent multiple '1' presses per 'E'
-
     with mss.MSS() as sct:
         while True:
             if keyboard.is_pressed("esc"):
@@ -106,10 +101,10 @@ def main():
             orange_mask = cv2.bitwise_and(orange_mask, cv2.bitwise_not(red_exclude))
             orange_ys, orange_xs = np.nonzero(orange_mask)
 
-            # --- Build debug display (4x upscale so it's easy to see) ---
+            # --- Build debug display (4x upscale) ---
             debug = bgr.copy()
-            debug[orange_mask > 0] = (0, 255, 255)   # yellow
-            debug[red_mask > 0]    = (255, 0, 255)   # magenta
+            debug[orange_mask > 0] = (0, 255, 255)   # yellow for orange zone
+            debug[red_mask > 0]    = (255, 0, 255)   # magenta for red stick
 
             cv2.line(debug, (int(cx)-5, int(cy)), (int(cx)+5, int(cy)), (255,255,255), 1)
             cv2.line(debug, (int(cx), int(cy)-5), (int(cx), int(cy)+5), (255,255,255), 1)
@@ -150,23 +145,15 @@ def main():
             if angle_in_zone(stick_angle, z_start, z_end):
                 now = time.time()
                 if now - last_press_time >= DEBOUNCE_SECONDS:
+                    # Press the lockpick key (E)
                     pydirectinput.press(ACTION_KEY)
+                    # Immediately press the key above Q (1/ą)
+                    pydirectinput.press(FOLLOW_UP_KEY)
                     last_press_time = now
 
-                    # ---- NEW: update the last 'E' press timestamp and reset flag ----
-                    last_e_time = now
-                    one_triggered = False
-
-                    print("[HIT] stick={:6.2f} deg  zone=({:6.2f} -> {:6.2f}) - pressed '{}'".format(
-                        stick_angle, zone_start, zone_end, ACTION_KEY.upper()
+                    print("[HIT] stick={:6.2f} deg  zone=({:6.2f} -> {:6.2f}) - pressed '{}' + '{}'".format(
+                        stick_angle, zone_start, zone_end, ACTION_KEY.upper(), FOLLOW_UP_KEY
                     ))
-
-            # ---- NEW: check for delayed follow-up press ----
-            now = time.time()
-            if last_e_time > 0 and (now - last_e_time) >= DELAY_AFTER_E and not one_triggered:
-                pydirectinput.press(FOLLOW_UP_KEY)
-                one_triggered = True
-                print("[DELAY] {}s after last E, pressed '{}'".format(DELAY_AFTER_E, FOLLOW_UP_KEY))
 
             time.sleep(POLL_INTERVAL)
 
