@@ -1,3 +1,9 @@
+"""
+FiveM Lockpick Minigame Auto-Solver - DEBUG VERSION
+Shows a live window of what the script sees, with colored overlays.
+Press ESC to quit.
+"""
+
 import sys
 import time
 import cv2
@@ -6,32 +12,27 @@ import mss
 import pydirectinput
 import keyboard
 
-# Fix Unicode crash on Windows terminals
 sys.stdout.reconfigure(encoding='utf-8')
 
 # =========================================================
 # ============== ADJUSTABLE CONFIGURATION =================
 # =========================================================
 
-#MONITOR = {"top": 603, "left": 2368, "width": 200, "height": 200}
-MONITOR = {"top": 390, "left": 810, "width": 300, "height": 300}
+MONITOR = {"top": 645, "left": 1645, "width": 160, "height": 160}
 
-RED_LOWER  = np.array([0,  120,  80])
-RED_UPPER  = np.array([8,  255, 255])
+RED_LOWER         = np.array([0,   150, 150])
+RED_UPPER         = np.array([5,   255, 255])
+RED_EXCLUDE_LOWER = np.array([0,   150, 150])
+RED_EXCLUDE_UPPER = np.array([5,   255, 255])
+ORANGE_LOWER      = np.array([10,  100, 100])
+ORANGE_UPPER      = np.array([30,  255, 255])
 
-# Used to exclude red pixels from the orange mask
-RED_EXCLUDE_LOWER = np.array([0,  100, 100])
-RED_EXCLUDE_UPPER = np.array([8,  255, 255])
-
-ORANGE_LOWER = np.array([10, 120, 120])
-ORANGE_UPPER = np.array([28, 255, 255])
-
-DEBOUNCE_SECONDS  = 1.0
+DEBOUNCE_SECONDS  = 0.2
 POLL_INTERVAL     = 0.003
 MIN_RED_PIXELS    = 20
 MIN_ORANGE_PIXELS = 80
-MIN_ORANGE_SPREAD = 10.0   # zone must span at least this many degrees
-MAX_ORANGE_SPREAD = 90.0   # zone must not span more than this (filters false positives)
+MIN_ORANGE_SPREAD = 10.0
+MAX_ORANGE_SPREAD = 180.0
 ANGLE_TOLERANCE   = 0.0
 ACTION_KEY        = "e"
 
@@ -43,7 +44,6 @@ pydirectinput.FAILSAFE = False
 # =========================================================
 
 def pixel_angle(x, y, cx, cy):
-    """0 deg = top, increasing clockwise, range [0, 360)."""
     dx = x - cx
     dy = y - cy
     ang = np.degrees(np.arctan2(dx, -dy))
@@ -51,17 +51,15 @@ def pixel_angle(x, y, cx, cy):
         return ang + 360.0 if ang < 0 else ang
     return np.where(ang < 0, ang + 360.0, ang)
 
-
 def angle_in_zone(angle, zone_start, zone_end):
     if zone_start <= zone_end:
         return zone_start <= angle <= zone_end
     return angle >= zone_start or angle <= zone_end
 
-
 def compute_zone_bounds(angles):
     if angles.size == 0:
         return None, None
-    sorted_a = np.sort(angles)
+    sorted_a  = np.sort(angles)
     diffs     = np.diff(sorted_a)
     wrap_diff = (sorted_a[0] + 360.0) - sorted_a[-1]
     all_diffs = np.append(diffs, wrap_diff)
@@ -75,7 +73,7 @@ def compute_zone_bounds(angles):
 # =========================================================
 
 def main():
-    print("Lockpick auto-solver running. Press ESC to quit.")
+    print("Lockpick auto-solver running (DEBUG MODE). Press ESC to quit.")
     cx = MONITOR["width"]  / 2.0
     cy = MONITOR["height"] / 2.0
     last_press_time = 0.0
@@ -84,6 +82,7 @@ def main():
         while True:
             if keyboard.is_pressed("esc"):
                 print("ESC pressed - exiting.")
+                cv2.destroyAllWindows()
                 break
 
             frame = np.array(sct.grab(MONITOR))
@@ -94,13 +93,35 @@ def main():
             red_mask       = cv2.inRange(hsv, RED_LOWER, RED_UPPER)
             red_ys, red_xs = np.nonzero(red_mask)
 
-            # --- Orange zone (exclude red pixels so needle doesn't bleed in) ---
-            orange_mask  = cv2.inRange(hsv, ORANGE_LOWER, ORANGE_UPPER)
-            red_exclude  = cv2.inRange(hsv, RED_EXCLUDE_LOWER, RED_EXCLUDE_UPPER)
-            orange_mask  = cv2.bitwise_and(orange_mask, cv2.bitwise_not(red_exclude))
+            # --- Orange zone ---
+            orange_mask = cv2.inRange(hsv, ORANGE_LOWER, ORANGE_UPPER)
+            red_exclude = cv2.inRange(hsv, RED_EXCLUDE_LOWER, RED_EXCLUDE_UPPER)
+            orange_mask = cv2.bitwise_and(orange_mask, cv2.bitwise_not(red_exclude))
             orange_ys, orange_xs = np.nonzero(orange_mask)
 
-            # Skip frame if not enough pixels detected
+            # --- Build debug display (4x upscale so it's easy to see) ---
+            debug = bgr.copy()
+
+            # Highlight detected orange pixels in bright yellow
+            debug[orange_mask > 0] = (0, 255, 255)
+
+            # Highlight detected red pixels in bright magenta
+            debug[red_mask > 0] = (255, 0, 255)
+
+            # Draw crosshair at center
+            cv2.line(debug, (int(cx)-5, int(cy)), (int(cx)+5, int(cy)), (255,255,255), 1)
+            cv2.line(debug, (int(cx), int(cy)-5), (int(cx), int(cy)+5), (255,255,255), 1)
+
+            # Print pixel counts on the image
+            label = "RED:{} ORANGE:{}".format(red_xs.size, orange_xs.size)
+            cv2.putText(debug, label, (2, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255,255,255), 1)
+
+            # Upscale 4x for visibility
+            display = cv2.resize(debug, (MONITOR["width"]*4, MONITOR["height"]*4), interpolation=cv2.INTER_NEAREST)
+            cv2.imshow("Lockpick Debug View", display)
+            cv2.waitKey(1)
+
+            # --- Skip if not enough pixels ---
             if red_xs.size < MIN_RED_PIXELS or orange_xs.size < MIN_ORANGE_PIXELS:
                 time.sleep(POLL_INTERVAL)
                 continue
@@ -117,13 +138,12 @@ def main():
                 time.sleep(POLL_INTERVAL)
                 continue
 
-            # --- False-positive guard: reject implausible arc sizes ---
             arc_span = (zone_end - zone_start) % 360.0
             if arc_span < MIN_ORANGE_SPREAD or arc_span > MAX_ORANGE_SPREAD:
+                print("Arc span rejected: {:.1f} deg".format(arc_span))
                 time.sleep(POLL_INTERVAL)
                 continue
 
-            # --- Check if stick is inside the zone ---
             z_start = (zone_start - ANGLE_TOLERANCE) % 360.0
             z_end   = (zone_end   + ANGLE_TOLERANCE) % 360.0
 
