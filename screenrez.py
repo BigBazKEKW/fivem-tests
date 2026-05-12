@@ -18,7 +18,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 # ============== ADJUSTABLE CONFIGURATION =================
 # =========================================================
 
-MONITOR = {"top": 645, "left": 1645, "width": 160, "height": 160}
+MONITOR = {"top": 520, "left": 1080, "width": 400, "height": 400}
 
 RED_LOWER         = np.array([0,   150, 150])
 RED_UPPER         = np.array([5,   255, 255])
